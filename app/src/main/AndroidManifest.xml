@@ -4,6 +4,11 @@
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
 
+    <!-- Cuaca (Open-Meteo), ping, dan cadangan: hanya meminta data kecil saat Home tampil. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+
     <!-- Android 11+: tanpa ini daftar aplikasi terpasang tidak terlihat oleh launcher. -->
     <queries>
         <intent>

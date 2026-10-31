@@ -23,7 +23,23 @@ sendiri. Pilih Build > Build APK.
 
 ## Tahap pengerjaan
 
-- [x] Tahap 1: layar Home (jam flip, dock 5 aplikasi, baris aplikasi, tema siang/malam, ayat contoh)
-- [ ] Tahap 2: cuaca + perkiraan 5 hari (Open-Meteo), Dynamic Island, dialog Sistem (RAM, memori, fps)
-- [ ] Tahap 3: Pengaturan di tengah layar (transparansi kaca, wallpaper, screensaver, suara, cadangan)
-- [ ] Tahap 4: ayat dari YouVersion, wallpaper dari galeri/TMDB, bersihkan cache
+- [x] Tahap 1: layar Home (jam, dock, baris aplikasi, tema siang/malam)
+- [x] Tahap 2 (sebagian):
+  - Dynamic Island kanan atas: Input (HDMI, AV, TV), Wi-Fi, Pengaturan
+  - Pengaturan kaca di tengah layar, terbuka seperti balon dari tombolnya
+    (Dark mode, Jam & Tanggal, System Sound, Backup/Restore, Pustaka Aplikasi, Ayat Harian)
+  - Jam flip beranimasi, cuaca hari ini + 7 hari (Open-Meteo), monitor RAM/penyimpanan/Wi-Fi/ping
+  - Ikon aplikasi gaya iOS, membesar saat fokus tanpa terpotong
+  - Tahan OK pada ikon: Pindah, Hapus dari Home, Info aplikasi
+  - Ayat harian offline (KJV, domain publik) atau ayat Anda sendiri lewat `verses.txt`
+- [ ] Tahap 2B: Screensaver (jam digital/analog/flip/nixie, StandBy ala iOS, Google Photos),
+      Sleep Timer, sumber wallpaper (TMDB, 4K gratis, Google Photos), widget Now Playing
+- [ ] Tahap 3: Live Camera PIP (butuh alamat RTSP kamera yang sudah dites)
+
+## Ayat dalam bahasa Indonesia
+
+Buat berkas `verses.txt` di folder `Android/data/com.advancedhome.tv/files/`, satu ayat per baris:
+
+    Mazmur 23:1|TUHAN adalah gembalaku, takkan kekurangan aku.
+
+Selama berkas itu ada, ayat harian diambil dari sana. Pastikan teksnya berlisensi untuk Anda pakai.

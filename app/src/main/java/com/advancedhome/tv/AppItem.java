@@ -19,7 +19,7 @@ import java.util.Map;
 /** Satu aplikasi yang bisa dibuka dari Home. */
 final class AppItem {
 
-    /** Aplikasi yang diutamakan masuk dock, sesuai urutan ini jika terpasang. */
+    /** Aplikasi yang diutamakan masuk dock saat pertama kali, sesuai urutan ini jika terpasang. */
     private static final List<String> PRIORITY = Arrays.asList(
             "com.google.android.youtube.tv",
             "com.netflix.ninja",
@@ -32,14 +32,12 @@ final class AppItem {
     final String pkg;
     final Intent launch;
     final Drawable art;
-    final boolean banner;
 
-    AppItem(String label, String pkg, Intent launch, Drawable art, boolean banner) {
+    AppItem(String label, String pkg, Intent launch, Drawable art) {
         this.label = label;
         this.pkg = pkg;
         this.launch = launch;
         this.art = art;
-        this.banner = banner;
     }
 
     /** Daftar aplikasi TV dan aplikasi biasa yang terpasang, tanpa launcher ini sendiri. */
@@ -52,14 +50,12 @@ final class AppItem {
             for (ResolveInfo ri : pm.queryIntentActivities(q, 0)) {
                 ActivityInfo ai = ri.activityInfo;
                 if (ai == null || ai.packageName.equals(c.getPackageName()) || out.containsKey(ai.packageName)) continue;
-                Drawable banner = ai.loadBanner(pm);
-                Drawable art = banner != null ? banner : ai.loadIcon(pm);
                 Intent launch = new Intent(Intent.ACTION_MAIN)
                         .addCategory(cat)
                         .setComponent(new ComponentName(ai.packageName, ai.name))
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 out.put(ai.packageName, new AppItem(String.valueOf(ri.loadLabel(pm)),
-                        ai.packageName, launch, art, banner != null));
+                        ai.packageName, launch, ai.loadIcon(pm)));
             }
         }
         List<AppItem> list = new ArrayList<>(out.values());
