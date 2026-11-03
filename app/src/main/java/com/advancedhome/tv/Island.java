@@ -16,9 +16,9 @@ import android.widget.TextView;
 
 /** Kapsul hitam ala Dynamic Island di kanan atas: Input, Wi-Fi, Pengaturan. Label melebar saat fokus. */
 final class Island extends LinearLayout {
-    static final int INPUT = 0, WIFI = 1, SETTINGS = 2;
+    static final int INPUT = 0, WIFI = 1, SETTINGS = 2, SLEEP = 3;
 
-    final Chip input, wifi, settings;
+    final Chip input, wifi, sleep, settings;
 
     Island(Context c, float u) {
         super(c);
@@ -34,6 +34,7 @@ final class Island extends LinearLayout {
         setPadding(p, p, p, p);
         input = add(new Chip(c, u, INPUT, "Input"));
         wifi = add(new Chip(c, u, WIFI, "Wi-Fi"));
+        sleep = add(new Chip(c, u, SLEEP, "Timer"));
         settings = add(new Chip(c, u, SETTINGS, "Pengaturan"));
     }
 
@@ -49,7 +50,7 @@ final class Island extends LinearLayout {
         private final Glyph glyph;
         private final TextView label;
         private final GradientDrawable fill = new GradientDrawable();
-        private final int fullW;
+        private int fullW;
         private ValueAnimator anim;
         private float ex;
 
@@ -99,7 +100,10 @@ final class Island extends LinearLayout {
             anim.start();
         }
 
-        void setLabel(String t) { label.setText(t); }
+        void setLabel(String t) {
+            label.setText(t);
+            fullW = Math.round(label.getPaint().measureText(t)) + Math.round(8 * u);
+        }
     }
 
     /** Ikon kecil: monitor (input), busur Wi-Fi, atau roda gigi sederhana. */
@@ -143,6 +147,11 @@ final class Island extends LinearLayout {
                 p.setStyle(Paint.Style.FILL);
                 c.drawCircle(cx, cy + s * 0.6f, 1.6f * u, p);
                 p.setStyle(Paint.Style.STROKE);
+            } else if (kind == SLEEP) {
+                // huruf Z: tanda tidur
+                c.drawLine(cx - s * 0.6f, cy - s * 0.6f, cx + s * 0.6f, cy - s * 0.6f, p);
+                c.drawLine(cx + s * 0.6f, cy - s * 0.6f, cx - s * 0.6f, cy + s * 0.6f, p);
+                c.drawLine(cx - s * 0.6f, cy + s * 0.6f, cx + s * 0.6f, cy + s * 0.6f, p);
             } else {
                 c.drawCircle(cx, cy, s * 0.35f, p);
                 for (int i = 0; i < 8; i++) {

@@ -15,6 +15,7 @@ import android.view.animation.DecelerateInterpolator;
 import android.view.animation.OvershootInterpolator;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.util.ArrayList;
@@ -58,8 +59,11 @@ final class Panel {
     private final float u;
     private final View dim;
     private final LinearLayout card, list;
+    private final ScrollView sv;
     private final TextView titleView;
     private final List<Page> stack = new ArrayList<>();
+    /** Per halaman: indeks baris yang terfokus saat halaman lain dibuka di atasnya. */
+    private final List<Integer> idx = new ArrayList<>();
     private Listener listener;
     private View source;
     private float srcDx, srcDy;
@@ -92,7 +96,11 @@ final class Panel {
         ((LinearLayout.LayoutParams) titleView.getLayoutParams()).bottomMargin = Math.round(12 * u);
         list = new LinearLayout(c);
         list.setOrientation(LinearLayout.VERTICAL);
-        card.addView(list);
+        sv = new ScrollView(c);
+        sv.setFocusable(false);
+        sv.setVerticalScrollBarEnabled(false);
+        sv.addView(list, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        card.addView(sv, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         host.addView(card, new FrameLayout.LayoutParams(Math.round(560 * u), ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
     }
 
@@ -103,9 +111,11 @@ final class Panel {
 
     void open(Page p, View from) {
         stack.clear();
+        idx.clear();
         stack.add(p);
+        idx.add(0);
         source = from;
-        render();
+        render(0);
         dim.setAlpha(0f);
         dim.setVisibility(View.VISIBLE);
         dim.animate().alpha(1f).setDuration(260).start();
@@ -126,16 +136,27 @@ final class Panel {
     }
 
     void push(Page p) {
+        idx.set(stack.size() - 1, focusedIndex());
         stack.add(p);
-        render();
+        idx.add(0);
+        render(0);
         pulse();
+    }
+
+    /** Mengganti halaman teratas (mis. daftar yang berubah) dengan tetap mempertahankan baris yang terfokus. */
+    void replaceTop(Page p) {
+        if (stack.isEmpty()) return;
+        int f = focusedIndex();
+        stack.set(stack.size() - 1, p);
+        render(f);
     }
 
     /** Kembali satu halaman, atau menutup panel kalau sudah di halaman pertama. */
     void back() {
         if (stack.size() > 1) {
             stack.remove(stack.size() - 1);
-            render();
+            idx.remove(idx.size() - 1);
+            render(idx.get(stack.size() - 1));   // sorotan kembali ke baris yang membuka halaman ini
             pulse();
         } else {
             close();
@@ -145,6 +166,7 @@ final class Panel {
     void close() {
         if (stack.isEmpty()) return;
         stack.clear();
+        idx.clear();
         final View from = source;
         dim.animate().alpha(0f).setDuration(220).start();
         card.animate().translationX(srcDx).translationY(srcDy).scaleX(0.08f).scaleY(0.08f).alpha(0f)
@@ -169,16 +191,26 @@ final class Panel {
 
     private Page top() { return stack.get(stack.size() - 1); }
 
-    private void render() {
+    private int focusedIndex() {
+        View f = list.getFocusedChild();
+        return f == null ? 0 : Math.max(0, list.indexOfChild(f));
+    }
+
+    private void render(int focus) {
         Page p = top();
         titleView.setText(p.title);
         list.removeAllViews();
+        int rowH = Math.round(54 * u);
         for (Row r : p.rows) {
             View v = makeRow(r);
-            list.addView(v, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Math.round(54 * u)));
+            list.addView(v, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, rowH));
         }
+        ViewGroup.LayoutParams lp = sv.getLayoutParams();
+        lp.height = Math.min(p.rows.size() * rowH, Math.round(500 * u));
+        sv.setLayoutParams(lp);
         refresh();
-        if (list.getChildCount() > 0) list.getChildAt(0).requestFocus();
+        int n = list.getChildCount();
+        if (n > 0) list.getChildAt(Math.max(0, Math.min(focus, n - 1))).requestFocus();
     }
 
     private void refresh() {

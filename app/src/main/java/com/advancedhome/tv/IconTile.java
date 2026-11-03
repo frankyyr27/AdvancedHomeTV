@@ -6,8 +6,8 @@ import android.graphics.Canvas;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.Path;
-import android.graphics.RectF;
 import android.graphics.Rect;
+import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.drawable.AdaptiveIconDrawable;
 import android.graphics.drawable.Drawable;
@@ -16,8 +16,9 @@ import android.view.animation.DecelerateInterpolator;
 import android.widget.TextView;
 
 /**
- * Ikon aplikasi bergaya iOS: kotak membulat (sudut 22%), ikon adaptif diisi penuh.
- * Membesar saat fokus dengan transform saja, jadi tepinya tidak terpotong selama
+ * Ikon aplikasi bergaya iOS: kotak dengan sudut tumpul (24%). Ikon adaptif diisi penuh; ikon biasa
+ * diletakkan di atas dasar terang (mode siang) atau gelap (mode malam) dengan perbandingan sisi
+ * dipertahankan. Membesar saat fokus dengan transform saja, jadi tepinya tidak terpotong selama
  * induknya tidak memotong anak (clipChildren = false).
  */
 final class IconTile extends View {
@@ -49,11 +50,11 @@ final class IconTile extends View {
         applyLook(false, 70);
     }
 
-    /** Warna kaca menyesuaikan siang atau malam dan tingkat transparansi (0 sampai 100). */
+    /** Dasar ikon mengikuti mode siang atau malam; transparansi 0 sampai 100 (makin besar makin bening). */
     void applyLook(boolean day, int transparency) {
-        int a = Math.round(30 + (100 - transparency) * 1.2f);
-        fill.setColor((a << 24) | 0x00FFFFFF);
-        stroke.setColor(day ? 0xCCFFFFFF : 0x55FFFFFF);
+        int a = Math.round(200 + (100 - transparency) * 0.55f);
+        fill.setColor((a << 24) | (day ? 0x00F2F2F7 : 0x001C1C1E));
+        stroke.setColor(day ? 0x66FFFFFF : 0x33FFFFFF);
         if (label != null) label.setTextColor(day ? 0xFF10131A : 0xFFFFFFFF);
         invalidate();
     }
@@ -66,7 +67,7 @@ final class IconTile extends View {
     @Override
     protected void onDraw(Canvas c) {
         int w = getWidth(), h = getHeight();
-        float r = Math.min(w, h) * 0.2237f;
+        float r = Math.min(w, h) * 0.24f;
         rr.set(0, 0, w, h);
         c.drawRoundRect(rr, r, r, fill);
 
@@ -83,9 +84,15 @@ final class IconTile extends View {
             if (bg != null) { bg.setBounds(-e, -e, w + e, h + e); bg.draw(c); }
             if (fg != null) { fg.setBounds(-e, -e, w + e, h + e); fg.draw(c); }
         } else if (d != null) {
-            int p = Math.round(w * 0.14f);
+            // Ikon biasa: perbandingan sisi dipertahankan, di tengah kotak.
+            int iw = d.getIntrinsicWidth(), ih = d.getIntrinsicHeight();
+            float box = w * 0.74f;
+            float s = iw > 0 && ih > 0 ? Math.min(box / iw, box / ih) : 1f;
+            int dw = iw > 0 ? Math.round(iw * s) : Math.round(box);
+            int dh = ih > 0 ? Math.round(ih * s) : Math.round(box);
+            int l = (w - dw) / 2, t = (h - dh) / 2;
             Rect old = d.copyBounds();
-            d.setBounds(p, p, w - p, h - p);
+            d.setBounds(l, t, l + dw, t + dh);
             d.draw(c);
             d.setBounds(old);
         }

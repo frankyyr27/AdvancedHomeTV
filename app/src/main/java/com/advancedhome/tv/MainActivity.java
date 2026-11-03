@@ -1,9 +1,13 @@
 package com.advancedhome.tv;
 
 import android.app.Activity;
+import android.app.role.RoleManager;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
+import android.graphics.Bitmap;
 import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -14,6 +18,7 @@ import android.net.ConnectivityManager;
 import android.net.NetworkCapabilities;
 import android.net.Uri;
 import android.net.wifi.WifiManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -27,6 +32,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -41,6 +47,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.TimeZone;
 
 /**
  * Layar Home. Semua ukuran dihitung dalam "unit panggung" 1280x720 lalu diskalakan ke
@@ -60,22 +67,30 @@ public class MainActivity extends Activity implements SettingsMenu.Host {
     private final SimpleDateFormat dateFmt = new SimpleDateFormat("EEEE, d MMMM", new Locale("id", "ID"));
 
     private float u;
-    private int screenW, screenH, shelfH;
-    private boolean day, clockReady;
-    private String appsKey = "";
+    private int screenW, screenH, shelfH, tickN;
+    private boolean day, lite, clockReady, saverOn, wallLoaded;
+    private String appsKey = "", camUrl, sleepLabel = "";
+    private long verseTry;
     private List<AppItem> allApps = new ArrayList<>();
     private String moving;
+    private BibleApi.Ref currentRef;
 
     private FrameLayout root;
-    private GradientDrawable wallpaper, bandBg;
+    private GradientDrawable wallpaper, bandBg, verseBg;
+    private ImageView wallImg;
+    private View wallScrim, blackout;
     private ScrollView scroll;
     private LinearLayout col, dockRow, grid, verseBox;
     private TextView title, sub, dateTv, vLabel, vText, vRef, toastTv;
     private FlipTile flipH, flipM;
     private WeatherView weather;
+    private NowPlaying nowPlaying;
+    private CameraPip cam;
     private Island island;
     private SysMonitor monitor;
     private Panel panel;
+    private Reader reader;
+    private SaverLayer saver;
     private SettingsMenu menu;
 
     // ---------- siklus hidup ----------
@@ -90,9 +105,14 @@ public class MainActivity extends Activity implements SettingsMenu.Host {
         screenH = dm.heightPixels;
         u = screenH / 720f;
         setContentView(buildUi());
+        // Suara klik dan geser bawaan sistem dimatikan; yang terdengar hanya System Sound pilihan Anda.
+        getWindow().getDecorView().setSoundEffectsEnabled(false);
+        quiet(root);
         menu = new SettingsMenu(this, panel);
         applyAll();
+        applyWallpaper(false);
         reload();
+        if (getIntent() != null && getIntent().getBooleanExtra("blackout", false)) blackout.setVisibility(View.VISIBLE);
     }
 
     @Override
@@ -103,13 +123,20 @@ public class MainActivity extends Activity implements SettingsMenu.Host {
         monitor.start();
         updateWifiLabel();
         loadWeather();
+        syncCamera();
+        applyWallpaper(false);
+        resetIdle();
         reload();
     }
 
     @Override
     protected void onPause() {
         ui.removeCallbacks(tick);
+        ui.removeCallbacks(saverStart);
         monitor.stop();
+        cam.stop();
+        camUrl = null;
+        hideSaverQuiet();
         super.onPause();
     }
 
@@ -117,10 +144,20 @@ public class MainActivity extends Activity implements SettingsMenu.Host {
     @Override
     protected void onNewIntent(Intent i) {
         super.onNewIntent(i);
+        if (i != null && i.getBooleanExtra("blackout", false)) {
+            blackout.setVisibility(View.VISIBLE);
+            return;
+        }
         moving = null;
+        reader.close();
         if (panel.isOpen()) panel.close();
         scroll.smoothScrollTo(0, 0);
         focusFirst();
+    }
+
+    @Override
+    public void onUserInteraction() {
+        resetIdle();
     }
 
     @Override
@@ -136,6 +173,18 @@ public class MainActivity extends Activity implements SettingsMenu.Host {
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
+        if (blackout.getVisibility() == View.VISIBLE) {
+            if (e.getAction() == KeyEvent.ACTION_DOWN) blackout.setVisibility(View.GONE);
+            return true;
+        }
+        if (saverOn) {
+            if (e.getAction() == KeyEvent.ACTION_DOWN) hideSaver();
+            return true;
+        }
+        if (reader.isOpen()) {
+            reader.handleKey(e);
+            return true;
+        }
         int k = e.getKeyCode();
         if (e.getAction() == KeyEvent.ACTION_DOWN && e.getRepeatCount() == 0) {
             if (k == KeyEvent.KEYCODE_DPAD_UP || k == KeyEvent.KEYCODE_DPAD_DOWN
@@ -164,6 +213,14 @@ public class MainActivity extends Activity implements SettingsMenu.Host {
         wallpaper = new GradientDrawable(GradientDrawable.Orientation.TL_BR, NIGHT_BG);
         root.setBackground(wallpaper);
 
+        wallImg = new ImageView(this);
+        wallImg.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        wallImg.setVisibility(View.GONE);
+        root.addView(wallImg, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        wallScrim = new View(this);
+        wallScrim.setVisibility(View.GONE);
+        root.addView(wallScrim, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
         // ScrollView tanpa auto-scroll bawaan: diatur sendiri di onFocused().
         scroll = new ScrollView(this) {
             @Override
@@ -178,7 +235,7 @@ public class MainActivity extends Activity implements SettingsMenu.Host {
         col.setClipChildren(false);
         scroll.addView(col, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        // --- rak atas: jam flip, cuaca, judul, ayat ---
+        // --- rak atas: jam flip, cuaca, Now Playing, kamera, judul, ayat ---
         FrameLayout shelf = new FrameLayout(this);
         shelf.setClipChildren(false);
         col.addView(shelf, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, shelfH));
@@ -206,6 +263,28 @@ public class MainActivity extends Activity implements SettingsMenu.Host {
         wlp.topMargin = px(140);
         shelf.addView(weather, wlp);
 
+        nowPlaying = new NowPlaying(this, u);
+        FrameLayout.LayoutParams nlp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        nlp.leftMargin = px(390);
+        nlp.topMargin = px(60);
+        shelf.addView(nowPlaying, nlp);
+
+        cam = new CameraPip(this, u);
+        FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(px(320), px(180));
+        clp.leftMargin = px(900);
+        clp.topMargin = px(140);
+        shelf.addView(cam, clp);
+        cam.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                try {
+                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(camUrl)).setPackage("org.videolan.vlc")
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                } catch (Exception e) {
+                    toast("Pasang VLC untuk melihat kamera layar penuh");
+                }
+            }
+        });
+
         title = text(46, true);
         title.setSingleLine(true);
         title.setEllipsize(TextUtils.TruncateAt.END);
@@ -224,19 +303,34 @@ public class MainActivity extends Activity implements SettingsMenu.Host {
 
         verseBox = new LinearLayout(this);
         verseBox.setOrientation(LinearLayout.VERTICAL);
+        verseBox.setFocusable(true);
+        verseBox.setClickable(true);
+        verseBox.setPadding(px(14), px(10), px(14), px(10));
+        verseBg = new GradientDrawable();
+        verseBg.setCornerRadius(px(20));
+        verseBox.setBackground(verseBg);
         vLabel = text(12, true);
-        vLabel.setText("AYAT HARI INI");
-        vLabel.setLetterSpacing(0.12f);
+        vLabel.setText("AYAT HARI INI  \u00b7  OK untuk bahasa dan baca pasal");
+        vLabel.setLetterSpacing(0.08f);
         vText = text(18, false);
         vRef = text(14, true);
         verseBox.addView(vLabel);
         verseBox.addView(vText);
         verseBox.addView(vRef);
         ((LinearLayout.LayoutParams) vText.getLayoutParams()).setMargins(0, px(5), 0, px(7));
-        FrameLayout.LayoutParams vlp = new FrameLayout.LayoutParams(px(464), ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM);
-        vlp.leftMargin = px(756);
-        vlp.bottomMargin = px(19);
+        FrameLayout.LayoutParams vlp = new FrameLayout.LayoutParams(px(480), ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM);
+        vlp.leftMargin = px(748);
+        vlp.bottomMargin = px(12);
         shelf.addView(verseBox, vlp);
+        verseBox.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { panel.open(menu.versePage(), verseBox); }
+        });
+        verseBox.setOnFocusChangeListener(new View.OnFocusChangeListener() {
+            @Override public void onFocusChange(View v, boolean f) {
+                verseBg.setStroke(f ? px(3) : 0, 0xFFFFFFFF);
+                if (f) scroll.smoothScrollTo(0, 0);
+            }
+        });
 
         // --- dock: pita kaca, jarak sama di semua sisi ---
         FrameLayout dock = new FrameLayout(this);
@@ -268,7 +362,7 @@ public class MainActivity extends Activity implements SettingsMenu.Host {
         grid.setPadding(0, px(44), 0, px(100));
         col.addView(grid, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        // --- lapisan di atas: monitor, island, toast, panel ---
+        // --- lapisan di atas: monitor, island, toast, panel, pembaca, screensaver ---
         monitor = new SysMonitor(this, u);
         FrameLayout.LayoutParams mon = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.END);
         mon.rightMargin = px(62);
@@ -297,8 +391,9 @@ public class MainActivity extends Activity implements SettingsMenu.Host {
         toastTv.setBackground(tg);
         toastTv.setPadding(px(26), px(12), px(26), px(12));
         toastTv.setAlpha(0f);
-        FrameLayout.LayoutParams tolp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        FrameLayout.LayoutParams tolp = new FrameLayout.LayoutParams(px(760), ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
         tolp.bottomMargin = px(34);
+        toastTv.setGravity(Gravity.CENTER);
         root.addView(toastTv, tolp);
 
         panel = new Panel(this, root, u);
@@ -313,6 +408,17 @@ public class MainActivity extends Activity implements SettingsMenu.Host {
                 }
             }
         });
+
+        reader = new Reader(this, root, u);
+
+        saver = new SaverLayer(this, u);
+        saver.setVisibility(View.GONE);
+        root.addView(saver, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        blackout = new View(this);
+        blackout.setBackgroundColor(0xFF000000);
+        blackout.setVisibility(View.GONE);
+        root.addView(blackout, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         return root;
     }
 
@@ -324,6 +430,25 @@ public class MainActivity extends Activity implements SettingsMenu.Host {
         return t;
     }
 
+    // ---------- suara bawaan sistem dimatikan ----------
+
+    private final ViewGroup.OnHierarchyChangeListener quietListener = new ViewGroup.OnHierarchyChangeListener() {
+        @Override public void onChildViewAdded(View parent, View child) { quiet(child); }
+        @Override public void onChildViewRemoved(View parent, View child) { }
+    };
+
+    /** Mematikan efek suara klik dan fokus bawaan di semua tampilan, termasuk yang ditambahkan nanti. */
+    private void quiet(View v) {
+        v.setSoundEffectsEnabled(false);
+        if (v instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) v;
+            g.setOnHierarchyChangeListener(quietListener);
+            for (int i = 0; i < g.getChildCount(); i++) quiet(g.getChildAt(i));
+        }
+    }
+
+    // ---------- Island: Input, Wi-Fi, Timer, Pengaturan ----------
+
     private void wireIsland() {
         View.OnFocusChangeListener up = new View.OnFocusChangeListener() {
             @Override public void onFocusChange(View v, boolean f) {
@@ -332,19 +457,21 @@ public class MainActivity extends Activity implements SettingsMenu.Host {
         };
         island.input.setOnFocusChangeListener(up);
         island.wifi.setOnFocusChangeListener(up);
+        island.sleep.setOnFocusChangeListener(up);
         island.settings.setOnFocusChangeListener(up);
         island.input.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { panel.open(inputsPage(), island.input); }
         });
         island.wifi.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { openSettingsScreen(Settings.ACTION_WIFI_SETTINGS); }
+            @Override public void onClick(View v) { openSystem(Settings.ACTION_WIFI_SETTINGS); }
+        });
+        island.sleep.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { panel.open(menu.sleepPage(), island.sleep); }
         });
         island.settings.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { panel.open(menu.root(), island.settings); }
         });
     }
-
-    // ---------- Input dan Wi-Fi ----------
 
     private Panel.Page inputsPage() {
         Panel.Page p = new Panel.Page("Input");
@@ -363,13 +490,11 @@ public class MainActivity extends Activity implements SettingsMenu.Host {
         } catch (Exception ignored) {
             // perangkat tanpa layanan input TV atau izin ditolak
         }
-        if (p.rows.isEmpty()) {
-            p.add(new Panel.Row("Tidak ada input ditemukan").value(textValue("")));
-        }
+        if (p.rows.isEmpty()) p.add(new Panel.Row("Tidak ada input ditemukan").value(textValue("")));
         p.add(new Panel.Row("Daftar input sistem").value(textValue("\u203a")).click(new Runnable() {
             @Override public void run() {
                 panel.close();
-                openSettingsScreen("com.android.tv.action.VIEW_INPUTS");
+                openSystem("com.android.tv.action.VIEW_INPUTS");
             }
         }));
         return p;
@@ -400,18 +525,6 @@ public class MainActivity extends Activity implements SettingsMenu.Host {
             startActivity(new Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         } catch (Exception e) {
             toast("Tidak bisa membuka input ini");
-        }
-    }
-
-    private void openSettingsScreen(String action) {
-        try {
-            startActivity(new Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-        } catch (Exception e) {
-            try {
-                startActivity(new Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-            } catch (Exception e2) {
-                toast("Tidak bisa membuka pengaturan");
-            }
         }
     }
 
@@ -606,7 +719,7 @@ public class MainActivity extends Activity implements SettingsMenu.Host {
         focusFirst();
     }
 
-    // ---------- menu tile: pindah, hapus, info, pustaka ----------
+    // ---------- menu ikon: pindah, hapus, info, pustaka ----------
 
     private Panel.Page tileMenu(final IconTile t) {
         final String pkg = t.app.pkg;
@@ -660,8 +773,7 @@ public class MainActivity extends Activity implements SettingsMenu.Host {
                     saveHome(cur);
                     buildApps();
                     toast(a.label + " ditambahkan ke Home");
-                    panel.back();
-                    panel.push(libraryPage());
+                    panel.replaceTop(libraryPage());
                 }
             }));
         }
@@ -689,7 +801,7 @@ public class MainActivity extends Activity implements SettingsMenu.Host {
             moving = null;
             return true;
         }
-        int to = i;
+        int to;
         if (k == KeyEvent.KEYCODE_DPAD_LEFT) to = i - 1;
         else if (k == KeyEvent.KEYCODE_DPAD_RIGHT) to = i + 1;
         else if (k == KeyEvent.KEYCODE_DPAD_UP) to = i - COLS;
@@ -704,14 +816,89 @@ public class MainActivity extends Activity implements SettingsMenu.Host {
         return true;
     }
 
+    // ---------- wallpaper foto ----------
+
+    private int dayNumber() {
+        long now = System.currentTimeMillis();
+        return (int) ((now + TimeZone.getDefault().getOffset(now)) / 86400000L);
+    }
+
+    private void applyWallpaper(boolean fetchNow) {
+        int src = Prefs.geti("wp_src", 0);
+        if (src <= 0) {
+            wallLoaded = false;
+            wallImg.setVisibility(View.GONE);
+            wallScrim.setVisibility(View.GONE);
+            applyAll();
+            return;
+        }
+        wallImg.setVisibility(View.VISIBLE);
+        wallScrim.setVisibility(View.VISIBLE);
+        if (!wallLoaded) {
+            Bitmap b = WallpaperRepo.cached(this, screenW, screenH);
+            if (b != null) {
+                wallImg.setImageBitmap(b);
+                wallLoaded = true;
+            }
+        }
+        if (fetchNow || !wallLoaded || Prefs.geti("wp_day", -1) != dayNumber()) {
+            WallpaperRepo.fetch(this, src, screenW, screenH, new WallpaperRepo.Callback() {
+                @Override public void onBitmap(Bitmap b, String info) {
+                    if (b != null) {
+                        wallImg.setImageBitmap(b);
+                        wallLoaded = true;
+                        Prefs.puti("wp_day", dayNumber());
+                        applyAll();
+                    } else if (info != null && !info.isEmpty()) {
+                        toast(info);
+                    }
+                }
+            });
+        }
+        applyAll();
+    }
+
     // ---------- cuaca, ayat, tema, jam ----------
 
     private void loadWeather() {
         final SettingsMenu.City c = SettingsMenu.city();
-        WeatherRepo.Data d = WeatherRepo.cached(c.lat, c.lon);
-        weather.setData(d);
+        weather.setData(WeatherRepo.cached(c.lat, c.lon));
         WeatherRepo.refresh(this, c.lat, c.lon, new WeatherRepo.Callback() {
             @Override public void onData(WeatherRepo.Data data) { weather.setData(data); }
+        });
+    }
+
+    private void loadVerse() {
+        boolean show = Prefs.getb("verse", true);
+        verseBox.setVisibility(show ? View.VISIBLE : View.GONE);
+        if (!show) return;
+        final String[] off = Verses.today(this);
+        final int lang = Prefs.geti("vlang", 0);
+        currentRef = BibleApi.parse(off[0]);
+        vText.setText(off[1]);
+        vRef.setText(off[0] + " \u00b7 " + off[2] + " (offline)");
+        if (currentRef == null || "verses.txt".equals(off[2])) return;
+        final String key = dayNumber() + "|" + lang + "|" + off[0];
+        if (key.equals(Prefs.gets("vd_key", ""))) {
+            vText.setText(Prefs.gets("vd_text", ""));
+            vRef.setText(off[0] + " \u00b7 " + Prefs.gets("vd_src", ""));
+            return;
+        }
+        if (System.currentTimeMillis() - verseTry < 60000) return;   // jangan mengulang permintaan terlalu sering
+        verseTry = System.currentTimeMillis();
+        final BibleApi.Ref r = currentRef;
+        BibleApi.chapter(r, r.chapter, lang, new BibleApi.Callback() {
+            @Override public void onResult(List<String[]> verses) {
+                if (verses == null) return;
+                String t = BibleApi.verseText(verses, r.verse);
+                if (t == null) return;
+                String src = BibleApi.langLabel(lang);
+                Prefs.puts("vd_key", key);
+                Prefs.puts("vd_text", t);
+                Prefs.puts("vd_src", src);
+                vText.setText(t);
+                vRef.setText(off[0] + " \u00b7 " + src);
+            }
         });
     }
 
@@ -723,9 +910,13 @@ public class MainActivity extends Activity implements SettingsMenu.Host {
 
     private void applyAll() {
         day = isDay();
+        boolean photo = wallLoaded && Prefs.geti("wp_src", 0) > 0;
+        lite = day && !photo;   // di atas foto, teks selalu putih
         wallpaper.setColors(day ? DAY_BG : NIGHT_BG);
-        int tx = day ? 0xFF10131A : 0xFFFFFFFF;
-        int tx2 = day ? 0xA010131A : 0xB3FFFFFF;
+        int dim = Prefs.geti("wp_dim", 25) + (day ? 0 : 20);
+        wallScrim.setBackgroundColor(Math.min(255, Math.round(255 * dim / 100f)) << 24);
+        int tx = lite ? 0xFF10131A : 0xFFFFFFFF;
+        int tx2 = lite ? 0xA010131A : 0xB3FFFFFF;
         title.setTextColor(tx);
         sub.setTextColor(tx2);
         dateTv.setTextColor(tx2);
@@ -734,18 +925,15 @@ public class MainActivity extends Activity implements SettingsMenu.Host {
         vRef.setTextColor(tx2);
         monitor.setTextColor(tx2);
         weather.setColors(tx, tx2);
-        bandBg.setColor(day ? 0x66FFFFFF : 0x22FFFFFF);
-        bandBg.setStroke(Math.max(1, px(1)), day ? 0xB3FFFFFF : 0x44FFFFFF);
-        for (IconTile t : tiles) t.applyLook(day, 70);
+        nowPlaying.setLook(lite, tx, tx2);
+        bandBg.setColor(lite ? 0x66FFFFFF : 0x22FFFFFF);
+        bandBg.setStroke(Math.max(1, px(1)), lite ? 0xB3FFFFFF : 0x44FFFFFF);
+        for (IconTile t : tiles) t.applyLook(lite, 70);
 
-        boolean showVerse = Prefs.getb("verse", true);
-        verseBox.setVisibility(showVerse ? View.VISIBLE : View.GONE);
-        if (showVerse) {
-            String[] v = Verses.today(this);
-            vText.setText(v[1]);
-            vRef.setText(v[0] + " \u00b7 " + v[2]);
-        }
+        loadVerse();
         dateTv.setVisibility(Prefs.getb("showDate", true) ? View.VISIBLE : View.GONE);
+        monitor.setVisibility(Prefs.getb("mon_on", true) ? View.VISIBLE : View.GONE);
+        if (!Prefs.getb("np_on", true)) nowPlaying.setVisibility(View.GONE);
         tickClock();
     }
 
@@ -767,6 +955,14 @@ public class MainActivity extends Activity implements SettingsMenu.Host {
         @Override public void run() {
             tickClock();
             if (isDay() != day) applyAll();
+            tickN++;
+            int left = SleepTimer.minutesLeft();
+            String lab = left > 0 ? left + " mnt" : "Timer";
+            if (!lab.equals(sleepLabel)) {
+                sleepLabel = lab;
+                island.sleep.setLabel(lab);
+            }
+            if (tickN % 3 == 0 && Prefs.getb("np_on", true)) nowPlaying.poll(MainActivity.this);
             ui.postDelayed(this, 1020 - System.currentTimeMillis() % 1000);
         }
     };
@@ -775,12 +971,59 @@ public class MainActivity extends Activity implements SettingsMenu.Host {
         return n < 10 ? "0" + n : String.valueOf(n);
     }
 
+    private void syncCamera() {
+        String url = Prefs.getb("cam_on", false) ? CameraPip.readUrl(this) : null;
+        if (url == null) {
+            cam.stop();
+            cam.setVisibility(View.GONE);
+            camUrl = null;
+            return;
+        }
+        cam.setVisibility(View.VISIBLE);
+        if (!url.equals(camUrl)) {
+            camUrl = url;
+            cam.start(url);
+        }
+    }
+
+    // ---------- screensaver ----------
+
+    private final Runnable saverStart = new Runnable() {
+        @Override public void run() { showSaver(-1); }
+    };
+
+    private void resetIdle() {
+        ui.removeCallbacks(saverStart);
+        int m = Prefs.geti("ss_min", 5);
+        if (m > 0 && Prefs.geti("ss_type", 0) < 5 && !saverOn) ui.postDelayed(saverStart, m * 60000L);
+    }
+
+    private void showSaver(int type) {
+        ui.removeCallbacks(saverStart);
+        saver.start(type);
+        saver.setVisibility(View.VISIBLE);
+        saverOn = true;
+    }
+
+    private void hideSaverQuiet() {
+        saver.stop();
+        saver.setVisibility(View.GONE);
+        saverOn = false;
+    }
+
+    private void hideSaver() {
+        hideSaverQuiet();
+        resetIdle();
+    }
+
     // ---------- SettingsMenu.Host ----------
 
     @Override
     public void changed() {
         applyAll();
         loadWeather();
+        syncCamera();
+        resetIdle();
     }
 
     @Override
@@ -788,12 +1031,91 @@ public class MainActivity extends Activity implements SettingsMenu.Host {
         toastTv.setText(s);
         toastTv.animate().cancel();
         toastTv.setAlpha(1f);
-        toastTv.animate().alpha(0f).setStartDelay(2200).setDuration(300).start();
+        toastTv.animate().alpha(0f).setStartDelay(2800).setDuration(300).start();
     }
 
     @Override
     public File profileFile() {
         File dir = getExternalFilesDir(null);
         return dir == null ? null : new File(dir, "profile.json");
+    }
+
+    @Override
+    public void wallpaperChanged() {
+        applyWallpaper(true);
+    }
+
+    @Override
+    public void previewSaver(final int type) {
+        panel.close();
+        ui.post(new Runnable() { @Override public void run() { showSaver(type); } });
+    }
+
+    @Override
+    public void openSystem(String action) {
+        try {
+            startActivity(new Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        } catch (Exception e) {
+            try {
+                startActivity(new Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            } catch (Exception e2) {
+                toast("Tidak bisa membuka pengaturan");
+            }
+        }
+    }
+
+    @Override
+    public boolean isDefaultHome() {
+        try {
+            Intent h = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME);
+            ResolveInfo ri = getPackageManager().resolveActivity(h, PackageManager.MATCH_DEFAULT_ONLY);
+            return ri != null && ri.activityInfo != null && getPackageName().equals(ri.activityInfo.packageName);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    @Override
+    public void makeDefaultHome() {
+        if (isDefaultHome()) {
+            toast("Advanced Home TV sudah menjadi launcher utama");
+            return;
+        }
+        try {
+            if (Build.VERSION.SDK_INT >= 29) {
+                RoleManager rm = (RoleManager) getSystemService(Context.ROLE_SERVICE);
+                if (rm != null && rm.isRoleAvailable(RoleManager.ROLE_HOME)) {
+                    startActivityForResult(rm.createRequestRoleIntent(RoleManager.ROLE_HOME), 77);
+                    return;
+                }
+            }
+        } catch (Exception ignored) { }
+        try {
+            startActivity(new Intent(Settings.ACTION_HOME_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            return;
+        } catch (Exception ignored) { }
+        toast("Tekan tombol Home di remote, lalu pilih Advanced Home TV dan Selalu. Atau lewat ADB: cmd package set-home-activity");
+        try {
+            startActivity(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        } catch (Exception ignored) { }
+    }
+
+    @Override public void startSleep(int minutes) { SleepTimer.start(this, minutes); }
+    @Override public void cancelSleep() { SleepTimer.cancel(this); }
+    @Override public int sleepLeft() { return SleepTimer.minutesLeft(); }
+    @Override public boolean sleepServiceOn() { return SleepService.enabled(); }
+
+    @Override
+    public String cameraStatus() {
+        return CameraPip.readUrl(this) == null ? "camera.txt belum ada" : "camera.txt terbaca";
+    }
+
+    @Override
+    public void readChapter() {
+        if (currentRef == null) {
+            toast("Pasal ini tidak tersedia untuk ayat saat ini");
+            return;
+        }
+        reader.open(currentRef, Prefs.geti("vlang", 0));
     }
 }

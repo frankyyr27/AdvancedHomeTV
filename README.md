@@ -21,25 +21,53 @@ Kalau build gagal, salin log bagian yang merah dari tab Actions dan kirim ke say
 Buka folder ini di Android Studio (Hedgehog atau lebih baru). Ia akan membuat Gradle wrapper
 sendiri. Pilih Build > Build APK.
 
-## Tahap pengerjaan
+## Fitur
 
-- [x] Tahap 1: layar Home (jam, dock, baris aplikasi, tema siang/malam)
-- [x] Tahap 2 (sebagian):
-  - Dynamic Island kanan atas: Input (HDMI, AV, TV), Wi-Fi, Pengaturan
-  - Pengaturan kaca di tengah layar, terbuka seperti balon dari tombolnya
-    (Dark mode, Jam & Tanggal, System Sound, Backup/Restore, Pustaka Aplikasi, Ayat Harian)
-  - Jam flip beranimasi, cuaca hari ini + 7 hari (Open-Meteo), monitor RAM/penyimpanan/Wi-Fi/ping
-  - Ikon aplikasi gaya iOS, membesar saat fokus tanpa terpotong
-  - Tahan OK pada ikon: Pindah, Hapus dari Home, Info aplikasi
-  - Ayat harian offline (KJV, domain publik) atau ayat Anda sendiri lewat `verses.txt`
-- [ ] Tahap 2B: Screensaver (jam digital/analog/flip/nixie, StandBy ala iOS, Google Photos),
-      Sleep Timer, sumber wallpaper (TMDB, 4K gratis, Google Photos), widget Now Playing
-- [ ] Tahap 3: Live Camera PIP (butuh alamat RTSP kamera yang sudah dites)
+- Home gaya iOS dan tvOS: jam flip beranimasi, cuaca 7 hari, dock kaca, ikon kotak tumpul yang mengikuti mode terang atau gelap
+- Dynamic Island kanan atas: Input (HDMI, AV, TV), Wi-Fi, Timer tidur, Pengaturan
+- Pengaturan di tengah layar, terbuka seperti balon. Tombol Back mengembalikan sorotan ke baris sebelumnya
+- Dark mode: Off atau Sunset to sunrise (dihitung dari lokasi, tanpa internet)
+- System Sound sintetis (PS2, PS3, PS4, PS5, Nintendo, Xbox, SEGA, Retro). Suara klik bawaan sistem dimatikan
+- Screensaver: jam digital, analog, flip, nixie, StandBy ala iOS (dua widget). Bisa juga dipilih sebagai screensaver sistem
+- Wallpaper foto: NASA APOD, foto acak 4K gratis, TMDB, atau folder sendiri
+- Timer tidur: 15, 30, 60 menit, atau custom
+- Ayat harian Indonesia atau English, bisa dibaca satu pasal penuh
+- Now Playing (kontrol media), monitor RAM dan Wi-Fi, kamera CCTV (PIP, eksperimental)
+- Tahan OK pada ikon: Pindah, Hapus dari Home, Info. Pustaka Aplikasi untuk menambahkan kembali
 
-## Ayat dalam bahasa Indonesia
+## Menyiapkan fitur tertentu
 
-Buat berkas `verses.txt` di folder `Android/data/com.advancedhome.tv/files/`, satu ayat per baris:
+**Jadikan launcher utama** (Pengaturan > Jadikan Launcher Utama, atau lewat ADB):
+
+    adb shell cmd package set-home-activity com.advancedhome.tv/.MainActivity
+
+**Now Playing** butuh akses notifikasi:
+
+    adb shell cmd notification allow_listener com.advancedhome.tv/com.advancedhome.tv.MediaListener
+
+**Timer tidur mematikan layar** butuh layanan aksesibilitas Advanced Home TV Sleep. Aktifkan di
+Pengaturan TV > Aksesibilitas. Apakah layar benar-benar mati saat dikunci tergantung merek TV.
+
+**Kamera CCTV**: buat `camera.txt` di folder `Android/data/com.advancedhome.tv/files/` berisi satu baris,
+misalnya `rtsp://192.168.1.3:554/ALAMAT-DARI-KAMERA`. Lalu nyalakan Pengaturan > Widget > Kamera CCTV.
+Uji alamatnya di VLC di komputer dulu (Media > Open Network Stream).
+
+**Wallpaper TMDB**: buat `tmdb_key.txt` berisi kunci API TMDB Anda (gratis).
+Produk ini memakai API TMDB tetapi tidak didukung atau disertifikasi oleh TMDB.
+
+**Wallpaper dari foto sendiri**: taruh JPG atau PNG di folder `wallpapers` di folder file aplikasi
+lalu pilih sumber Folder lokal.
+
+**Ayat bahasa Indonesia sendiri**: buat `verses.txt` di folder file aplikasi, satu ayat per baris:
 
     Mazmur 23:1|TUHAN adalah gembalaku, takkan kekurangan aku.
 
-Selama berkas itu ada, ayat harian diambil dari sana. Pastikan teksnya berlisensi untuk Anda pakai.
+Ayat Indonesia online memakai layanan komunitas yang tidak resmi (data Terjemahan Baru dari sabda.org),
+jadi bisa berhenti kapan saja. Pastikan teks yang Anda pakai berlisensi untuk Anda gunakan.
+
+## Tahap pengerjaan
+
+- [x] Tahap 1: layar Home
+- [x] Tahap 2: Island, pengaturan, jam flip, cuaca, ikon iOS, pindah/hapus aplikasi
+- [x] Tahap 2B: Screensaver, Timer tidur, wallpaper foto, Now Playing, kamera PIP, ayat dan pembaca pasal
+- [ ] Berikutnya: sesuai hasil uji di TV
