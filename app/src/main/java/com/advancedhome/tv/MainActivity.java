@@ -90,6 +90,8 @@ public class MainActivity extends Activity implements SettingsMenu.Host {
     private SysMonitor monitor;
     private Panel panel;
     private Reader reader;
+    private TextPrompt prompt;
+    private View prevFocus;
     private SaverLayer saver;
     private SettingsMenu menu;
 
@@ -162,7 +164,9 @@ public class MainActivity extends Activity implements SettingsMenu.Host {
 
     @Override
     public void onBackPressed() {
-        if (moving != null) {
+        if (prompt.isOpen()) {
+            prompt.close();
+        } else if (moving != null) {
             moving = null;
             toast("Posisi disimpan");
         } else if (panel.isOpen()) {
@@ -186,7 +190,17 @@ public class MainActivity extends Activity implements SettingsMenu.Host {
             return true;
         }
         int k = e.getKeyCode();
-        if (e.getAction() == KeyEvent.ACTION_DOWN && e.getRepeatCount() == 0) {
+        if (prompt.isOpen()) {
+            // Keyboard TV menerima tombol lebih dulu; Back yang sampai ke sini menutup kolom teks.
+            if (k == KeyEvent.KEYCODE_BACK) {
+                if (e.getAction() == KeyEvent.ACTION_DOWN) prompt.close();
+                return true;
+            }
+            return super.dispatchKeyEvent(e);
+        }
+        // Baris yang memutar suaranya sendiri (pilihan System Sound, volume) tidak memicu suara tombol global.
+        boolean mute = panel.isOpen() && panel.focusedSilent();
+        if (!mute && e.getAction() == KeyEvent.ACTION_DOWN && e.getRepeatCount() == 0) {
             if (k == KeyEvent.KEYCODE_DPAD_UP || k == KeyEvent.KEYCODE_DPAD_DOWN
                     || k == KeyEvent.KEYCODE_DPAD_LEFT || k == KeyEvent.KEYCODE_DPAD_RIGHT) Sound.play("nav");
             else if (k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER) Sound.play("ok");
@@ -276,11 +290,13 @@ public class MainActivity extends Activity implements SettingsMenu.Host {
         shelf.addView(cam, clp);
         cam.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
+                if (camUrl == null) return;
                 try {
-                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(camUrl)).setPackage("org.videolan.vlc")
-                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                    Intent view = new Intent(Intent.ACTION_VIEW, Uri.parse(camUrl)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    if (camUrl.startsWith("rtsp://")) view.setPackage("org.videolan.vlc");
+                    startActivity(view);
                 } catch (Exception e) {
-                    toast("Pasang VLC untuk melihat kamera layar penuh");
+                    toast(camUrl.startsWith("rtsp://") ? "Pasang VLC untuk melihat kamera layar penuh" : "Tidak ada browser untuk membuka tautan");
                 }
             }
         });
@@ -410,6 +426,11 @@ public class MainActivity extends Activity implements SettingsMenu.Host {
         });
 
         reader = new Reader(this, root, u);
+
+        prompt = new TextPrompt(this, root, u);
+        prompt.setOnClose(new Runnable() {
+            @Override public void run() { promptClosed(); }
+        });
 
         saver = new SaverLayer(this, u);
         saver.setVisibility(View.GONE);
@@ -1107,7 +1128,58 @@ public class MainActivity extends Activity implements SettingsMenu.Host {
 
     @Override
     public String cameraStatus() {
-        return CameraPip.readUrl(this) == null ? "camera.txt belum ada" : "camera.txt terbaca";
+        return CameraPip.kind(CameraPip.readUrl(this));
+    }
+
+    @Override
+    public void promptText(String title, String hint, final String key) {
+        prevFocus = getCurrentFocus();
+        panel.setFocusBlocked(true);
+        prompt.open(title, hint, Prefs.gets(key, ""), new TextPrompt.Callback() {
+            @Override public void onText(String text) {
+                Prefs.puts(key, text);
+                textChanged(key);
+            }
+        });
+    }
+
+    /** Kolom teks tertutup: panel boleh menerima fokus lagi dan sorotan kembali ke baris tadi. */
+    private void promptClosed() {
+        panel.setFocusBlocked(false);
+        View f = prevFocus;
+        prevFocus = null;
+        if (f != null && f.isAttachedToWindow()) f.requestFocus();
+    }
+
+    private void textChanged(String key) {
+        if (key.equals("tmdb_key") && !Prefs.gets(key, "").isEmpty()) {
+            Prefs.puti("wp_src", 3);
+            applyWallpaper(true);
+        } else if (key.equals("wp_url") && !Prefs.gets(key, "").isEmpty()) {
+            Prefs.puti("wp_src", 5);
+            applyWallpaper(true);
+        } else if (key.equals("cam_url")) {
+            Prefs.putb("cam_on", !Prefs.gets(key, "").isEmpty());
+            syncCamera();
+        }
+        changed();
+        toast("Tersimpan");
+    }
+
+    @Override
+    public void disableSystemSounds() {
+        try {
+            if (Settings.System.canWrite(this)) {
+                Settings.System.putInt(getContentResolver(), Settings.System.SOUND_EFFECTS_ENABLED, 0);
+                toast("Suara klik bawaan TV dimatikan");
+                return;
+            }
+            startActivity(new Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:" + getPackageName()))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            toast("Izinkan Advanced Home TV mengubah pengaturan sistem, lalu tekan tombol ini lagi");
+            return;
+        } catch (Exception ignored) { }
+        toast("Lewat ADB: adb shell settings put system sound_effects_enabled 0");
     }
 
     @Override

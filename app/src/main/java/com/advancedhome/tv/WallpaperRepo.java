@@ -30,7 +30,7 @@ import java.util.Random;
 final class WallpaperRepo {
 
     static final String[] NAMES = {"Bawaan (gradien)", "NASA APOD (4K gratis)", "Foto acak 4K gratis",
-            "TMDB (backdrop film)", "Folder lokal"};
+            "TMDB (backdrop film)", "Folder lokal", "URL gambar sendiri"};
 
     interface Callback { void onBitmap(Bitmap b, String info); }
 
@@ -69,7 +69,7 @@ final class WallpaperRepo {
                         else { copy(new FileInputStream(imgs.get(new Random().nextInt(imgs.size()))), tmp); }
                     } else {
                         String url = pickUrl(c, src);
-                        if (url == null) info = src == 3 ? "TMDB butuh kunci API (tmdb_key.txt)" : "Sumber tidak tersedia";
+                        if (url == null) info = src == 3 ? "Isi kunci API TMDB di Wallpaper > Kunci API TMDB" : src == 5 ? "Isi alamat gambar di Wallpaper > URL gambar sendiri" : "Sumber tidak tersedia";
                         else download(url, tmp);
                     }
                     if (tmp.isFile() && tmp.length() > 0) {
@@ -98,6 +98,8 @@ final class WallpaperRepo {
     }
 
     static String tmdbKey(Context c) {
+        String saved = Prefs.gets("tmdb_key", "");
+        if (saved != null && !saved.trim().isEmpty()) return saved.trim();
         try {
             File f = new File(c.getExternalFilesDir(null), "tmdb_key.txt");
             if (!f.isFile() || f.length() > 200) return null;
@@ -111,6 +113,10 @@ final class WallpaperRepo {
     }
 
     private static String pickUrl(Context c, int src) throws Exception {
+        if (src == 5) {
+            String url = Prefs.gets("wp_url", "").trim();
+            return url.startsWith("https://") || url.startsWith("http://") ? url : null;
+        }
         if (src == 2) return "https://picsum.photos/3840/2160?random=" + System.currentTimeMillis();
         if (src == 1) {
             JSONArray a = new JSONArray(getText("https://api.nasa.gov/planetary/apod?api_key=DEMO_KEY&count=10"));

@@ -37,6 +37,17 @@ sendiri. Pilih Build > Build APK.
 
 ## Menyiapkan fitur tertentu
 
+**Mengisi teks di TV** (kunci API, URL gambar, alamat kamera): di pengaturan, baris bertanda "Belum diisi"
+membuka kolom teks. Tekan OK pada kolom untuk memunculkan keyboard TV. Tersedia juga tombol Tempel
+(dari clipboard), Hapus, Simpan, dan Batal. Kalau TV Anda tidak punya aplikasi keyboard, isi lewat berkas
+(`tmdb_key.txt`, `camera.txt`) seperti di bawah.
+
+**Suara klik bawaan TV masih terdengar?** Buka Pengaturan > System Sound > Matikan suara klik bawaan TV
+(minta izin Ubah pengaturan sistem), atau lewat ADB:
+
+    adb shell settings put system sound_effects_enabled 0
+
+
 **Jadikan launcher utama** (Pengaturan > Jadikan Launcher Utama, atau lewat ADB):
 
     adb shell cmd package set-home-activity com.advancedhome.tv/.MainActivity
@@ -48,7 +59,7 @@ sendiri. Pilih Build > Build APK.
 **Timer tidur mematikan layar** butuh layanan aksesibilitas Advanced Home TV Sleep. Aktifkan di
 Pengaturan TV > Aksesibilitas. Apakah layar benar-benar mati saat dikunci tergantung merek TV.
 
-**Kamera CCTV**: buat `camera.txt` di folder `Android/data/com.advancedhome.tv/files/` berisi satu baris,
+**Kamera CCTV**: isi Pengaturan > Widget > Alamat kamera (rtsp://... atau tautan berbagi), atau buat `camera.txt` di folder `Android/data/com.advancedhome.tv/files/` berisi satu baris,
 misalnya `rtsp://192.168.1.3:554/ALAMAT-DARI-KAMERA`. Lalu nyalakan Pengaturan > Widget > Kamera CCTV.
 Uji alamatnya di VLC di komputer dulu (Media > Open Network Stream).
 

@@ -10,6 +10,9 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 import android.widget.TextView;
 import android.widget.VideoView;
@@ -20,13 +23,15 @@ import java.io.FileInputStream;
 import java.io.InputStreamReader;
 
 /**
- * Jendela kecil kamera CCTV (picture in picture) di Home. Alamat RTSP dibaca dari camera.txt di folder file aplikasi.
- * Pemutaran RTSP memakai pemutar bawaan Android, yang tidak semua TV dan kamera mendukungnya (eksperimental).
+ * Jendela kecil kamera CCTV (picture in picture) di Home. Alamat diisi di Pengaturan > Widget > Alamat kamera
+ * (atau camera.txt). rtsp:// diputar dengan pemutar bawaan Android; tautan http(s) (mis. tautan berbagi) dibuka di WebView.
+ * Keduanya eksperimental: tidak semua TV, kamera, atau halaman berbagi bisa diputar, dan WebView memakai memori cukup besar.
  */
 final class CameraPip extends FrameLayout {
 
     private final VideoView video;
     private final TextView msg;
+    private WebView web;
 
     CameraPip(Context c, final float u) {
         super(c);
@@ -54,17 +59,19 @@ final class CameraPip extends FrameLayout {
         setVisibility(GONE);
     }
 
-    /** Baris pertama camera.txt (alamat rtsp://...), atau null kalau berkas belum ada. */
+    /** Alamat dari pengaturan, atau baris pertama camera.txt. Null kalau belum diisi. */
     static String readUrl(Context c) {
+        String saved = Prefs.gets("cam_url", "");
+        if (saved != null && isAddress(saved.trim())) return saved.trim();
         try {
             File dir = c.getExternalFilesDir(null);
             File f = dir == null ? null : new File(dir, "camera.txt");
-            if (f == null || !f.isFile() || f.length() > 2000) return null;
+            if (f == null || !f.isFile() || f.length() > 4000) return null;
             BufferedReader r = new BufferedReader(new InputStreamReader(new FileInputStream(f), "UTF-8"));
             String line;
             while ((line = r.readLine()) != null) {
                 line = line.trim();
-                if (line.startsWith("rtsp://") || line.startsWith("http")) {
+                if (isAddress(line)) {
                     r.close();
                     return line;
                 }
@@ -74,8 +81,47 @@ final class CameraPip extends FrameLayout {
         return null;
     }
 
+    private static boolean isAddress(String s) {
+        return s.startsWith("rtsp://") || s.startsWith("http://") || s.startsWith("https://");
+    }
+
+    /** "RTSP", "Tautan web", atau "Belum diisi", untuk ditampilkan di pengaturan. */
+    static String kind(String url) {
+        return url == null ? "Belum diisi" : url.startsWith("rtsp://") ? "RTSP" : "Tautan web";
+    }
+
     void start(String url) {
+        stop();
+        if (url.startsWith("http")) startWeb(url);
+        else startVideo(url);
+    }
+
+    private void startWeb(String url) {
         try {
+            video.setVisibility(INVISIBLE);
+            msg.setVisibility(VISIBLE);
+            msg.setText("Memuat tautan kamera\u2026");
+            web = new WebView(getContext());
+            web.setFocusable(false);
+            web.setClickable(false);
+            WebSettings ws = web.getSettings();
+            ws.setJavaScriptEnabled(true);
+            ws.setDomStorageEnabled(true);
+            ws.setMediaPlaybackRequiresUserGesture(false);
+            web.setWebViewClient(new WebViewClient() {
+                @Override public void onPageFinished(WebView v, String u) { msg.setVisibility(GONE); }
+            });
+            addView(web, 1, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            web.loadUrl(url);
+        } catch (Throwable t) {
+            msg.setVisibility(VISIBLE);
+            msg.setText("WebView tidak tersedia di TV ini");
+        }
+    }
+
+    private void startVideo(String url) {
+        try {
+            video.setVisibility(VISIBLE);
             msg.setVisibility(VISIBLE);
             msg.setText("Memuat kamera\u2026");
             video.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
@@ -88,7 +134,7 @@ final class CameraPip extends FrameLayout {
             video.setOnErrorListener(new MediaPlayer.OnErrorListener() {
                 @Override public boolean onError(MediaPlayer mp, int what, int extra) {
                     msg.setVisibility(VISIBLE);
-                    msg.setText("Kamera tidak bisa dibuka.\nCek alamat di camera.txt");
+                    msg.setText("Kamera tidak bisa dibuka.\nPeriksa alamat kamera");
                     return true;
                 }
             });
@@ -100,5 +146,13 @@ final class CameraPip extends FrameLayout {
 
     void stop() {
         try { video.stopPlayback(); } catch (Exception ignored) { }
+        if (web != null) {
+            try {
+                web.loadUrl("about:blank");
+                removeView(web);
+                web.destroy();
+            } catch (Exception ignored) { }
+            web = null;
+        }
     }
 }

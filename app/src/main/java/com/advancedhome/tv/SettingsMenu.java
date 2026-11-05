@@ -29,6 +29,10 @@ final class SettingsMenu {
         boolean sleepServiceOn();
         String cameraStatus();
         void readChapter();
+        /** Membuka kolom input teks untuk pengaturan {@code key}; hasilnya disimpan oleh Host. */
+        void promptText(String title, String hint, String key);
+        /** Mematikan suara klik bawaan sistem TV (butuh izin Ubah pengaturan sistem). */
+        void disableSystemSounds();
     }
 
     static final class City {
@@ -108,6 +112,20 @@ final class SettingsMenu {
                 });
     }
 
+    /** Baris yang membuka kolom input teks. Nilai ditampilkan ringkas; kunci rahasia disamarkan. */
+    private Panel.Row input(String label, final String key, final String title, final String hint, final boolean secret) {
+        return new Panel.Row(label)
+                .value(new Panel.Value() {
+                    @Override public String get() {
+                        String v = Prefs.gets(key, "").trim();
+                        if (v.isEmpty()) return "Belum diisi";
+                        if (secret) return "\u2022\u2022\u2022\u2022" + v.substring(Math.max(0, v.length() - 4));
+                        return v.length() > 22 ? v.substring(0, 14) + "\u2026" + v.substring(v.length() - 6) : v;
+                    }
+                })
+                .click(new Runnable() { @Override public void run() { host.promptText(title, hint, key); } });
+    }
+
     /** Baris pilihan: bertanda centang kalau nilainya terpilih. */
     private Panel.Row choice(final String key, final int val, String label, final int def) {
         return new Panel.Row(label)
@@ -136,6 +154,10 @@ final class SettingsMenu {
                                 host.changed();
                             }
                         }))
+                .add(input("Kunci API TMDB", "tmdb_key", "Kunci API TMDB",
+                        "Salin kunci API dari akun themoviedb.org (Settings > API). Tersimpan hanya di TV ini.", true))
+                .add(input("URL gambar sendiri", "wp_url", "URL gambar",
+                        "Alamat gambar yang diawali https://. Setelah disimpan, sumbernya otomatis memakai URL ini.", false))
                 .add(new Panel.Row("Google Photos").value(text("Belum bisa"))
                         .click(new Runnable() {
                             @Override public void run() {
@@ -174,8 +196,10 @@ final class SettingsMenu {
 
     private Panel.Page sound() {
         Panel.Page p = new Panel.Page("System Sound");
-        for (int i = 0; i < Sound.NAMES.length; i++) p.add(choice("sound", i, Sound.NAMES[i], 4));
-        p.add(new Panel.Row("Volume efek suara")
+        for (int i = 0; i < Sound.NAMES.length; i++) p.add(choice("sound", i, Sound.NAMES[i], 4).silent());
+        p.add(new Panel.Row("Matikan suara klik bawaan TV").value(text("\u203a"))
+                .click(new Runnable() { @Override public void run() { host.disableSystemSounds(); } }));
+        p.add(new Panel.Row("Volume efek suara").silent()
                 .value(new Panel.Value() { @Override public String get() { return Prefs.geti("vol", 60) + "%"; } })
                 .step(new Panel.Step() {
                     @Override public void step(int d) {
@@ -291,13 +315,10 @@ final class SettingsMenu {
                         .click(new Runnable() { @Override public void run() { host.openSystem("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"); } }))
                 .add(toggle("Monitor sistem", "mon_on", true))
                 .add(toggle("Kamera CCTV (PIP)", "cam_on", false))
-                .add(new Panel.Row("Alamat kamera")
-                        .value(new Panel.Value() { @Override public String get() { return host.cameraStatus(); } })
-                        .click(new Runnable() {
-                            @Override public void run() {
-                                host.toast("Isi camera.txt di folder file aplikasi dengan satu baris: rtsp://...");
-                            }
-                        }));
+                .add(input("Alamat kamera", "cam_url", "Alamat kamera",
+                        "rtsp://... atau tautan berbagi (https://...). Tautan berbagi memberi akses ke kamera Anda, jangan dibagikan.", false))
+                .add(new Panel.Row("Jenis alamat")
+                        .value(new Panel.Value() { @Override public String get() { return host.cameraStatus(); } }));
     }
 
     private Panel.Page backup() {

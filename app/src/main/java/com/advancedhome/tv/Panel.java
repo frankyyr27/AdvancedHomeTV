@@ -37,6 +37,8 @@ final class Panel {
         Runnable click;
         Step step;
         boolean toggle;
+        /** true: suara tombol global tidak diputar untuk baris ini (baris yang memutar suaranya sendiri). */
+        boolean silent;
         TextView valueView;
         Switch sw;
 
@@ -45,6 +47,7 @@ final class Panel {
         Row click(Runnable r) { click = r; return this; }
         Row step(Step s) { step = s; return this; }
         Row toggle() { toggle = true; return this; }
+        Row silent() { silent = true; return this; }
     }
 
     static final class Page {
@@ -106,6 +109,21 @@ final class Panel {
 
     void setListener(Listener l) { listener = l; }
     boolean isOpen() { return !stack.isEmpty(); }
+
+    /** Baris yang sedang terfokus memutar suaranya sendiri, jadi suara tombol global dilewati. */
+    boolean focusedSilent() {
+        if (stack.isEmpty()) return false;
+        View f = list.getFocusedChild();
+        if (f == null) return false;
+        int i = list.indexOfChild(f);
+        List<Row> rows = top().rows;
+        return i >= 0 && i < rows.size() && rows.get(i).silent;
+    }
+
+    /** Saat kolom teks tampil di atas panel, panel tidak boleh merebut fokus. */
+    void setFocusBlocked(boolean blocked) {
+        card.setDescendantFocusability(blocked ? ViewGroup.FOCUS_BLOCK_DESCENDANTS : ViewGroup.FOCUS_AFTER_DESCENDANTS);
+    }
 
     // ---------- membuka dan menutup ----------
 
